@@ -2,10 +2,9 @@
 
 ## 🎯 Overview
 
-This repository contains a complete audio processing ecosystem with both hardware and software components:
+This repository contains everything you need to turn your esp32s3 and pcm5102 into an affordable USB DAC
 
-- **Protocols**: USB Audio Class (UAC) and Web Serial communication
-
+- **Protocols**: USB Audio Class (UAC) 
 ## 📁 Project Structure
 
 ### Hardware Projects
@@ -78,8 +77,4 @@ Contributions are welcome! Please feel free to submit issues, feature requests, 
 
 ## 📚 Documentation
 
-Each project contains detailed documentation in its respective README file:
-- [Serial-Mic Documentation](./serial-mic/README.md)
-- [USB-Audio Documentation](./usb-audio/README.md)
-- [Frontend Documentation](./frontend/README.md)
-- [3D Visualizer Documentation](./3d-visualiser/README.md)
+[USB-Audio Documentation](./usb-audio/README.md)
