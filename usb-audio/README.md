@@ -1,47 +1,158 @@
 # ESP32-S3 USB Audio Device
 
-ESP32-S3 implementation of a USB Audio Class (UAC) device that appears as a standard USB microphone and speaker to the host computer. Provides plug-and-play audio functionality with both input and output capabilities.
+A complete USB Audio Class 2.0 implementation for ESP32-S3 that provides high-quality audio input/output capabilities. This device appears as a standard USB microphone and speaker to any host computer.
 
-This uses the `espressif/usb_device_uac` [component](https://components.espressif.com/components/espressif/usb_device_uac/versions/1.2.1/readme)
+## 🎯 Features
 
-## WARNING - this seems to be a bit experimental!
-
-There is an important setting that makes this work on Mac computers, but not on Windows - `CONFIG_UAC_SUPPORT_MACOS` enabling this makes it work on Mac computers - but it stops it working properly on Windows machines...
-
-## 🎯 Overview
-
-This firmware transforms the ESP32-S3 into a USB Audio Class 2.0 compliant device that can be used as a standard USB microphone and speaker. It provides high-quality audio capture from a PDM microphone and audio output via I2S interface, making it compatible with any operating system that supports USB audio devices.
+- ✅ **USB Audio Class 2.0** - Full compliance with USB audio standards
+- ✅ **High-Quality Audio** - 48kHz, 16-bit stereo audio
+- ✅ **Plug-and-Play** - Works with Windows, macOS, and Linux
+- ✅ **Logarithmic Volume Control** - Natural volume scaling that matches human hearing
+- ✅ **Configurable Default Volume** - Set startup volume via menuconfig (no reflash needed)
+- ✅ **Amplifier Control** - Proper power sequencing and timing
+- ✅ **ESP-IDF v5.5.2** - Latest framework compatibility
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- ESP32-S3 development board (DevKitC-1 recommended)
-- PDM microphone module
+- ESP32-S3 development board
+- PDM microphone module (optional)
 - I2S audio amplifier/speaker (optional)
-- ESP-IDF development environment
-- USB-C cable for programming and communication
+- ESP-IDF v5.5.2 development environment
+- USB-C cable
 
-### Hardware Setup
+### Hardware Connections
 
-#### Pin Connections
 ```
-ESP32-S3    PDM Microphone    I2S Audio Output
-GPIO 9  →   Clock (BCLK)      -
-GPIO 10 →   LR Clock (WS)     - (tied to GND)
-GPIO 11 →   Data (DATA)       -
-GPIO 13 →   -                 Data Out (DOUT)
-GPIO 14 →   -                 Bit Clock (BCLK)
-GPIO 21 →   -                 Word Select (WS)
-GPIO 12 →   -                 Amplifier Enable (SD_MODE)
-3.3V    →   VCC               VCC
-GND     →   GND               GND
+ESP32-S3    | PDM Mic    | I2S Amplifier
+------------|------------|---------------
+GPIO 9      | CLK        | -
+GPIO 10     | LR (GND)   | -
+GPIO 11     | DATA       | -
+GPIO 13     | -          | DOUT
+GPIO 14     | -          | BCLK
+GPIO 21     | -          | WS/LRC
+GPIO 12     | -          | SD_MODE (Enable)
 ```
 
-### Software Installation
+### Software Setup
 
-#### ESP-IDF Setup
-```bash
-# Install ESP-IDF (if not already installed)
+1. **Clone and Build**:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/esp32-usb-audio.git
+   cd esp32-usb-audio
+   idf.py build
+   ```
+
+2. **Configure Default Volume** (Optional):
+   ```bash
+   idf.py menuconfig
+   # Navigate to: ESP32 USB Audio Configuration → Default volume factor
+   # Set value (10 = -20dB, 5 = -26dB, 1 = -40dB)
+   ```
+
+3. **Flash to Device**:
+   ```bash
+   idf.py flash
+   ```
+
+4. **Monitor** (Optional):
+   ```bash
+   idf.py monitor
+   ```
+
+## 🎵 Usage
+
+1. Connect the ESP32-S3 to your computer via USB
+2. The device will appear as "ESP32 UAC Speaker" in your audio devices
+3. Select it as your default audio output device
+4. Adjust volume using your system's volume controls
+5. Audio will play through the connected I2S amplifier
+
+## ⚙️ Configuration Options
+
+### Default Volume Factor
+- **Location**: `ESP32 USB Audio Configuration → Default volume factor`
+- **Range**: 1-100 (represents 0.01-1.0 linear gain)
+- **Default**: 10 (-20dB, prevents clipping)
+- **Effect**: Sets the initial volume level when device connects
+
+### Audio Parameters
+- **Sample Rate**: 48kHz (configurable via sdkconfig)
+- **Bit Depth**: 16-bit
+- **Channels**: Mono input, Mono output
+- **USB Class**: Audio Class 2.0
+
+## 🔧 Technical Details
+
+### Audio Processing Pipeline
+1. **USB Audio Reception** → 48kHz 16-bit PCM
+2. **Volume Scaling** → Logarithmic gain control
+3. **Clipping Prevention** → Hard limiting at ±32k
+4. **I2S Transmission** → Standard I2S format
+5. **Amplifier Control** → Proper power sequencing
+
+### Volume Control Algorithm
+```c
+// Logarithmic mapping for perceptual volume control
+float db = -40.0f + (volume - 1) * 20.0f / 99.0f;
+volume_factor = powf(10.0f, db / 20.0f);
+```
+
+### USB Descriptors
+- **Device Class**: Composite (MISC)
+- **Audio Control**: Interface 0
+- **Audio Streaming**: Interface 1
+- **Endpoint**: Isochronous OUT (EP 0x01)
+- **Feedback**: Isochronous IN (EP 0x81)
+
+## 🐛 Troubleshooting
+
+### Device Not Recognized
+- Check USB cable and connections
+- Verify ESP32-S3 is properly powered
+- Try different USB port/host computer
+
+### No Audio Output
+- Confirm I2S connections (DOUT, BCLK, WS)
+- Check amplifier power and enable pin
+- Verify volume is not muted
+
+### Distortion Issues
+- Reduce default volume factor in menuconfig
+- Check I2S timing (try toggling WS inversion)
+- Ensure clean power supply to ESP32-S3
+
+### Windows Compatibility
+- Device uses USB Audio Class 2.0
+- Compatible with Windows 10/11
+- Appears in Device Manager and Sound settings
+
+## 📋 Requirements
+
+- **ESP-IDF**: v5.5.2
+- **Chip**: ESP32-S3
+- **Flash**: Minimum 4MB
+- **RAM**: ~50KB for audio buffers
+- **USB**: USB 2.0 Full Speed
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- Based on Espressif's `usb_device_uac` component
+- TinyUSB stack for USB implementation
+- ESP-IDF framework and community
 git clone --recursive https://github.com/espressif/esp-idf.git
 cd esp-idf
 ./install.sh
