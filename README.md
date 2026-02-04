@@ -10,11 +10,10 @@ This repository contains everything you need to turn your esp32s3 and pcm5102 in
 ### Hardware Projects
 
 #### [`usb-audio/`](./usb-audio/)
-ESP32-S3 implementation of a USB Audio Class (UAC) device that appears as a standard USB microphone to the host computer. Provides both input (microphone) and output (speaker) capabilities.
+ESP32-S3 implementation of a USB Audio Class (UAC) device that appears as a standard USB Speaker to the host computer. 
 
 **Key Features:**
 - USB Audio Class 2.0 compliant
-- PDM microphone input
 - I2S audio output
 - Volume and mute controls
 - Plug-and-play USB device
