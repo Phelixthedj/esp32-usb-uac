@@ -12,7 +12,12 @@
 #include "driver/i2s_pdm.h"
 #include "driver/i2s_std.h"
 #include <math.h>
-#include "driver/ledc.h"
+#include "tusb.h"
+#include "uac_descriptors.h"
+
+// Define missing macros
+#define AUDIO_PROTOCOL_2_0 0x20
+#define ITF_NUM_TOTAL 2  // Control + Streaming interface
 
 
 #define SPEAKER_I2S_DOUT  13
@@ -28,9 +33,8 @@ static i2s_chan_handle_t rx;
 static i2s_chan_handle_t tx;
 
 static bool is_muted = false;
-// volume is in dB
-static uint32_t volume = 0;
-static uint32_t volume_factor = 100;
+// volume scaling factor (0.01 to 1.0 for -40dB to 0dB range)
+static float volume_factor = CONFIG_DEFAULT_VOLUME_FACTOR_INT / 100.0f;  // Configurable default volume
 
 static esp_err_t usb_uac_device_output_cb(uint8_t *buf, size_t len, void *arg)
 {
@@ -44,8 +48,9 @@ static esp_err_t usb_uac_device_output_cb(uint8_t *buf, size_t len, void *arg)
             continue;
         }
         int32_t sample = samples[i];
-        // volume is in dB
-        sample = (sample * volume_factor) / 100;
+        // Apply volume scaling (volume_factor is 0.01 to 1.0)
+        sample = (int32_t)(sample * volume_factor);
+        // Ensure no overflow
         if (sample > 32767) {
             sample = 32767;
         } else if (sample < -32768) {
@@ -76,10 +81,17 @@ static void usb_uac_device_set_mute_cb(uint32_t mute, void *arg)
 }
 static void usb_uac_device_set_volume_cb(uint32_t _volume, void *arg)
 {
-    // see here for what is going on here: https://github.com/espressif/esp-iot-solution/blob/36d8130e8e880720108de2c31ce0779827b1bcd9/components/usb/usb_device_uac/usb_device_uac.c#L259
-    // _volume = (volume_db + 50) * 2
-    int volume_db = _volume / 2 - 50;
-    volume_factor = pow(10, volume_db / 20.0f) * 100.0f;
+    // _volume ranges from 0 to 100 (Windows volume control)
+    // Map to logarithmic volume curve for better perceptual scaling
+    if (_volume == 0) {
+        volume_factor = 0.001f;  // Very low volume (~ -60dB)
+    } else {
+        // Logarithmic mapping: _volume 1-100 maps to ~ -40dB to 0dB
+        // Using: factor = 10^((volume-1) * (0 - (-40)) / (100-1) / 20)
+        // This gives smooth logarithmic volume control
+        float db = -40.0f + (_volume - 1) * (0.0f - (-40.0f)) / 99.0f;
+        volume_factor = powf(10.0f, db / 20.0f);
+    }
 }
 
 static void usb_uac_device_init(void)
@@ -90,9 +102,100 @@ static void usb_uac_device_init(void)
         .set_mute_cb = usb_uac_device_set_mute_cb,
         .set_volume_cb = usb_uac_device_set_volume_cb,
         .cb_ctx = NULL,
+        .spk_itf_num = 1,  // Audio streaming interface
+        .mic_itf_num = -1, // No microphone
     };
     /* Init UAC device, UAC related configurations can be set by the menuconfig */
     ESP_ERROR_CHECK(uac_device_init(&config));
+}
+
+// USB Device Descriptor
+static tusb_desc_device_t const desc_device = {
+    .bLength            = sizeof(tusb_desc_device_t),
+    .bDescriptorType    = TUSB_DESC_DEVICE,
+    .bcdUSB             = 0x0200,
+    .bDeviceClass       = TUSB_CLASS_MISC,
+    .bDeviceSubClass    = MISC_SUBCLASS_COMMON,
+    .bDeviceProtocol    = MISC_PROTOCOL_IAD,
+    .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
+    .idVendor           = 0x303A, // Espressif VID
+    .idProduct          = 0x4000,
+    .bcdDevice          = 0x0100,
+    .iManufacturer      = 0x01,
+    .iProduct           = 0x02,
+    .iSerialNumber      = 0x03,
+    .bNumConfigurations = 0x01
+};
+
+// Configuration Descriptor
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_AUDIO_DEVICE_DESC_LEN)
+
+static uint8_t const desc_configuration[] = {
+    // Config number, interface count, string index, total length, attribute, power in mA
+    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+
+    // Audio descriptor for speaker
+    TUD_AUDIO_SPEAK_DESCRIPTOR(0, 4, 0x01, 0x81)
+};
+
+// String descriptors
+static char const* string_desc_arr [] = {
+    (const char[]) { 0x09, 0x04 }, // 0: is supported language is English (0x0409)
+    "Espressif",                   // 1: Manufacturer
+    "ESP32 UAC Speaker",           // 2: Product
+    "123456",                      // 3: Serials
+    "UAC Speaker Control",         // 4: Audio Control Interface
+    "UAC Speaker Streaming",       // 5: Audio Streaming Interface
+};
+
+static uint16_t _desc_str[32];
+
+uint8_t const * tud_descriptor_device_cb(void)
+{
+    return (uint8_t const *) &desc_device;
+}
+
+uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
+{
+    (void) index; // for multiple configurations
+    return desc_configuration;
+}
+
+uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid)
+{
+    (void) langid;
+
+    uint8_t chr_count;
+
+    if ( index == 0)
+    {
+        memcpy(&_desc_str[1], string_desc_arr[0], 2);
+        chr_count = 2;
+    }
+    else
+    {
+        // Note: the 0xEE index string is a Microsoft OS 1.0 Descriptors.
+        // https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/microsoft-defined-usb-descriptors
+
+        if ( !(index < sizeof(string_desc_arr)/sizeof(string_desc_arr[0])) ) return NULL;
+
+        const char* str = string_desc_arr[index];
+
+        // Cap at max char
+        chr_count = strlen(str);
+        if ( chr_count > 31 ) chr_count = 31;
+
+        // Convert ASCII string into UTF-16
+        for(uint8_t i=0; i<chr_count; i++)
+        {
+            _desc_str[1+i] = str[i];
+        }
+    }
+
+    // first byte is length (including header), second byte is string type
+    _desc_str[0] = (TUSB_DESC_STRING << 8 ) | (2*chr_count + 2);
+
+    return _desc_str;
 }
 
 void init_pdm_rx(void) {
@@ -132,7 +235,7 @@ static void init_pcm_tx(void) {
             .invert_flags = {
                 .mclk_inv = false,
                 .bclk_inv = false,
-                .ws_inv   = false,     // if L/R are swapped or silent, try true
+                .ws_inv   = true,      // WS inversion for amplifier compatibility
             },
         },
     };
@@ -145,12 +248,19 @@ void app_main(void)
 {
     init_pdm_rx();
     init_pcm_tx();
+    
+    // Wait for I2S to stabilize before enabling amplifier
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
     usb_uac_device_init();
 
-    // enable the amplifier
+    // enable the amplifier with proper initialization
     gpio_reset_pin(SPEAKER_SD_MODE);
     gpio_set_direction(SPEAKER_SD_MODE, GPIO_MODE_OUTPUT);
-    gpio_set_level(SPEAKER_SD_MODE, 1);
+    gpio_set_level(SPEAKER_SD_MODE, 0);  // Start disabled
+    vTaskDelay(pdMS_TO_TICKS(50));       // Wait for discharge
+    gpio_set_level(SPEAKER_SD_MODE, 1);  // Enable
+    vTaskDelay(pdMS_TO_TICKS(200));      // Wait for startup
 
     // tie the mic LR clock to GND
     gpio_reset_pin(MIC_I2S_LR);

@@ -1,0 +1,12 @@
+menu "ESP32 USB Audio Configuration"
+
+    config DEFAULT_VOLUME_FACTOR_INT
+        int "Default volume factor (1-100, represents 0.01-1.0)"
+        default 10
+        range 1 100
+        help
+            Default volume scaling factor for audio output as integer.
+            100 = 1.0 (0dB, full volume), 10 = 0.1 (-20dB), 1 = 0.01 (-40dB).
+            This prevents clipping and sets the initial volume level.
+
+endmenu
